@@ -295,6 +295,27 @@ const main = async () => {
         });
     };
 
+    const importModel = async (filename: string, sourceUrl: string) => {
+        // Work around some static hosts returning streamed SOG responses that fail zip random-access reads.
+        // For SOG URLs, fetch to a Blob first and import as a local File.
+        if (sourceUrl.toLowerCase().endsWith('.sog')) {
+            const response = await fetch(sourceUrl, { cache: 'no-store' });
+            if (!response.ok) {
+                throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+            }
+            const blob = await response.blob();
+            return await events.invoke('import', [{
+                filename,
+                contents: new File([blob], filename, { type: 'application/octet-stream' })
+            }]);
+        }
+
+        return await events.invoke('import', [{
+            filename,
+            url: sourceUrl
+        }]);
+    };
+
     const loadList = url.searchParams.getAll('load');
     const filenameList = url.searchParams.getAll('filename');
     for (const [i, value] of loadList.entries()) {
@@ -303,19 +324,13 @@ const main = async () => {
             decodeURIComponent(filenameList[i]) :
             decoded.split('/').pop();
 
-        const imported = await events.invoke('import', [{
-            filename,
-            url: decoded
-        }]);
+        const imported = await importModel(filename, decoded);
         rotateImportedSplatsX90(imported);
     }
 
     // In viewer mode, auto-load a local sample if no load param is provided.
     if (viewerOnly && loadList.length === 0) {
-        const imported = await events.invoke('import', [{
-            filename: 'Stein.sog',
-            url: './static/Stein.sog'
-        }]);
+        const imported = await importModel('Stein.sog', './static/Stein.sog');
         rotateImportedSplatsX90(imported);
     }
 
