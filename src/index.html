@@ -14,9 +14,17 @@
         <script>
             const sw = navigator.serviceWorker;
             if (sw) {
-                sw.register('./sw.js')
-                    .then(reg => console.log('service worker registered', reg))
-                    .catch(err => console.log('failed to register service worker', err));
+                const isLocalhost = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+                if (isLocalhost) {
+                    sw.getRegistrations()
+                        .then(registrations => Promise.all(registrations.map(reg => reg.unregister())))
+                        .then(() => console.log('service workers unregistered for local dev'))
+                        .catch(err => console.log('failed to unregister service workers', err));
+                } else {
+                    sw.register('./sw.js')
+                        .then(reg => console.log('service worker registered', reg))
+                        .catch(err => console.log('failed to register service worker', err));
+                }
             }
         </script>
     </head>

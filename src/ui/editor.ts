@@ -28,6 +28,29 @@ import { version } from '../../package.json';
 
 // ts compiler and vscode find this type, but eslint does not
 type FilePickerAcceptType = unknown;
+interface EditorUIOptions {
+    viewerOnly?: boolean;
+}
+
+const CAMERA_TARGETS = {
+    image1: {
+        position: { x: -0.09481655806303024, y: 1.9842095375061035, z: -30.723054885864258 },
+        target: { x: 0.3025389442118099, y: 2.315386377683981, z: -49.691884485997235 }
+    },
+    image2: {
+        position: { x: 0.8265447020530701, y: 2.75212025642395, z: -74.70670318603516 },
+        target: { x: 13.980445489022944, y: 5.327443779980989, z: -88.1390024722935 }
+    },
+    image3: {
+        position: { x: 0.9127567410469055, y: 9.438339233398438, z: -67.42160034179688 },
+        target: { x: 0.8746512648643985, y: 5.859911900022582, z: -66.74004597150994 }
+    }
+} as const;
+
+const VIEWER_NOTE = {
+    position: { x: 3.3191983272917707, y: 3.0731552014743144, z: -76.79501217896394 },
+    label: 'Wooden window frame'
+} as const;
 
 const removeExtension = (filename: string) => {
     return filename.substring(0, filename.length - path.getExtension(filename).length);
@@ -41,7 +64,9 @@ class EditorUI {
     canvas: HTMLCanvasElement;
     popup: Popup;
 
-    constructor(events: Events) {
+    constructor(events: Events, options: EditorUIOptions = {}) {
+        const viewerOnly = options.viewerOnly ?? false;
+
         // favicon
         const link = document.createElement('link');
         link.rel = 'icon';
@@ -118,26 +143,127 @@ class EditorUI {
         const tooltips = new Tooltips();
         tooltipsContainer.append(tooltips);
 
-        // bottom toolbar
-        const scenePanel = new ScenePanel(events, tooltips);
-        const viewPanel = new ViewPanel(events, tooltips);
-        const colorPanel = new ColorPanel(events, tooltips);
-        const bottomToolbar = new BottomToolbar(events, tooltips);
-        const rightToolbar = new RightToolbar(events, tooltips);
-        const modeToggle = new ModeToggle(events, tooltips);
-        const menu = new Menu(events);
-
         canvasContainer.dom.appendChild(canvas);
         canvasContainer.append(appLabel);
         canvasContainer.append(cursorLabel);
         canvasContainer.append(toolsContainer);
-        canvasContainer.append(scenePanel);
-        canvasContainer.append(viewPanel);
-        canvasContainer.append(colorPanel);
-        canvasContainer.append(bottomToolbar);
-        canvasContainer.append(rightToolbar);
-        canvasContainer.append(modeToggle);
-        canvasContainer.append(menu);
+        const rightToolbar = new RightToolbar(events, tooltips);
+
+        if (!viewerOnly) {
+            const scenePanel = new ScenePanel(events, tooltips);
+            const viewPanel = new ViewPanel(events, tooltips);
+            const colorPanel = new ColorPanel(events, tooltips);
+            const bottomToolbar = new BottomToolbar(events, tooltips);
+            const modeToggle = new ModeToggle(events, tooltips);
+            const menu = new Menu(events);
+
+            canvasContainer.append(scenePanel);
+            canvasContainer.append(viewPanel);
+            canvasContainer.append(colorPanel);
+            canvasContainer.append(bottomToolbar);
+            canvasContainer.append(rightToolbar);
+            canvasContainer.append(modeToggle);
+            canvasContainer.append(menu);
+        } else {
+            // Keep only navigation controls in viewer mode.
+            canvasContainer.append(rightToolbar);
+
+            // Camera presets for viewer mode.
+            const presets = document.createElement('div');
+            presets.id = 'viewer-camera-presets';
+
+            const applyPreset = (key: keyof typeof CAMERA_TARGETS) => {
+                const preset = CAMERA_TARGETS[key];
+                const moveSpeed = 2.6;
+                const moveEasing = 'easeIn';
+                const pose = {
+                    position: new Vec3(preset.position.x, preset.position.y, preset.position.z),
+                    target: new Vec3(preset.target.x, preset.target.y, preset.target.z)
+                };
+
+                // Primary path through event bus.
+                events.fire('camera.setPose', pose, moveSpeed, moveEasing);
+
+                // Fallback path in case listener registration is missing in a custom build.
+                const scene = (window as any).scene;
+                scene?.camera?.setPose?.(pose.position, pose.target, moveSpeed, moveEasing);
+                if (scene) {
+                    scene.forceRender = true;
+                }
+                console.log(`[viewer-camera] moved to ${key}`);
+            };
+
+            const makeButton = (label: string, key: keyof typeof CAMERA_TARGETS) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'viewer-camera-button';
+                button.textContent = label;
+                button.style.pointerEvents = 'auto';
+                button.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    console.log(`[viewer-camera] click ${key}`);
+                    applyPreset(key);
+                });
+                button.addEventListener('pointerdown', (event) => {
+                    event.stopPropagation();
+                });
+                return button;
+            };
+
+            presets.appendChild(makeButton('Image 1', 'image1'));
+            presets.appendChild(makeButton('Image 2', 'image2'));
+            presets.appendChild(makeButton('Image 3', 'image3'));
+            // Attach to body to avoid any canvas/container hit-testing quirks.
+            document.body.appendChild(presets);
+
+            // Single hardcoded annotation anchored to a world-space point.
+            const note = document.createElement('div');
+            note.id = 'viewer-annotation';
+
+            const noteArrow = document.createElement('div');
+            noteArrow.className = 'viewer-annotation-arrow';
+            const noteLine = document.createElement('div');
+            noteLine.className = 'viewer-annotation-line';
+            const noteLabel = document.createElement('div');
+            noteLabel.className = 'viewer-annotation-label';
+            noteLabel.textContent = VIEWER_NOTE.label;
+
+            note.appendChild(noteArrow);
+            note.appendChild(noteLine);
+            note.appendChild(noteLabel);
+            document.body.appendChild(note);
+
+            const noteWorld = new Vec3(VIEWER_NOTE.position.x, VIEWER_NOTE.position.y, VIEWER_NOTE.position.z);
+            const noteScreen = new Vec3();
+
+            const updateNote = () => {
+                const scene = (window as any).scene;
+                if (!scene?.camera?.worldToScreen) {
+                    note.style.display = 'none';
+                    return;
+                }
+
+                scene.camera.worldToScreen(noteWorld, noteScreen);
+
+                const inside =
+                    noteScreen.z >= 0 && noteScreen.z <= 1 &&
+                    noteScreen.x >= 0 && noteScreen.x <= 1 &&
+                    noteScreen.y >= 0 && noteScreen.y <= 1;
+
+                if (!inside) {
+                    note.style.display = 'none';
+                    return;
+                }
+
+                const rect = canvas.getBoundingClientRect();
+                note.style.display = 'flex';
+                note.style.left = `${rect.left + noteScreen.x * rect.width}px`;
+                note.style.top = `${rect.top + noteScreen.y * rect.height}px`;
+            };
+
+            events.on('prerender', updateNote);
+            window.addEventListener('resize', updateNote);
+        }
 
         // view axes container
         const viewCube = new ViewCube(events);
@@ -151,12 +277,13 @@ class EditorUI {
             id: 'main-container'
         });
 
-        const timelinePanel = new TimelinePanel(events, tooltips);
-        const dataPanel = new DataPanel(events);
-
         mainContainer.append(canvasContainer);
-        mainContainer.append(timelinePanel);
-        mainContainer.append(dataPanel);
+        if (!viewerOnly) {
+            const timelinePanel = new TimelinePanel(events, tooltips);
+            const dataPanel = new DataPanel(events);
+            mainContainer.append(timelinePanel);
+            mainContainer.append(dataPanel);
+        }
 
         editorContainer.append(mainContainer);
 
@@ -164,9 +291,6 @@ class EditorUI {
 
         // message popup
         const popup = new Popup(tooltips);
-
-        // shortcuts popup
-        const shortcutsPopup = new ShortcutsPopup(events);
 
         // export popup
         const exportPopup = new ExportPopup(events);
@@ -188,7 +312,11 @@ class EditorUI {
         topContainer.append(publishSettingsDialog);
         topContainer.append(imageSettingsDialog);
         topContainer.append(videoSettingsDialog);
-        topContainer.append(shortcutsPopup);
+        let shortcutsPopup: ShortcutsPopup = null;
+        if (!viewerOnly) {
+            shortcutsPopup = new ShortcutsPopup(events);
+            topContainer.append(shortcutsPopup);
+        }
         topContainer.append(aboutPopup);
 
         appContainer.append(editorContainer);
@@ -206,7 +334,9 @@ class EditorUI {
         document.body.setAttribute('tabIndex', '-1');
 
         events.on('show.shortcuts', () => {
-            shortcutsPopup.hidden = false;
+            if (shortcutsPopup) {
+                shortcutsPopup.hidden = false;
+            }
         });
 
         events.function('show.exportPopup', (exportType, splatNames: [string], showFilenameEdit: boolean) => {

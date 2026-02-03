@@ -78,6 +78,10 @@ const main = async () => {
 
     // url
     const url = new URL(window.location.href);
+    const viewerOnly = ['1', 'true', 'yes'].includes((url.searchParams.get('viewer') ?? '').toLowerCase());
+    if (viewerOnly) {
+        document.body.classList.add('viewer-only');
+    }
 
     // edit history
     const editHistory = new EditHistory(events);
@@ -97,11 +101,39 @@ const main = async () => {
     registerIframeApi(events);
 
     // initialize shortcuts
-    const shortcutManager = new ShortcutManager(events);
-    events.function('shortcutManager', () => shortcutManager);
+    if (!viewerOnly) {
+        const shortcutManager = new ShortcutManager(events);
+        events.function('shortcutManager', () => shortcutManager);
+    } else {
+        events.function('shortcutManager', () => {
+            return {
+                formatShortcut: () => ''
+            };
+        });
+    }
 
     // editor ui
-    const editorUI = new EditorUI(events);
+    const editorUI = new EditorUI(events, { viewerOnly });
+    if (viewerOnly) {
+        // Fallback: force-hide editor affordances in case any are created by cached code.
+        [
+            '#menu',
+            '#bottom-toolbar',
+            '#timeline-panel',
+            '#data-panel',
+            '#scene-panel',
+            '#view-panel',
+            '#color-panel',
+            '#mode-toggle',
+            '#tools-container',
+            '#mask-canvas'
+        ].forEach((selector) => {
+            const element = document.querySelector(selector) as HTMLElement;
+            if (element) {
+                element.style.display = 'none';
+            }
+        });
+    }
 
     // create the graphics device
     const graphicsDevice = await createGraphicsDevice(editorUI.canvas, {
@@ -203,33 +235,35 @@ const main = async () => {
     setUnselectedClr(toColor(sceneConfig.unselectedClr));
     setLockedClr(toColor(sceneConfig.lockedClr));
 
-    // create the mask selection canvas
-    const maskCanvas = document.createElement('canvas');
-    const maskContext = maskCanvas.getContext('2d');
-    maskCanvas.setAttribute('id', 'mask-canvas');
-    maskContext.globalCompositeOperation = 'copy';
-
-    const mask = {
-        canvas: maskCanvas,
-        context: maskContext
-    };
-
     // tool manager
     const toolManager = new ToolManager(events);
-    toolManager.register('rectSelection', new RectSelection(events, editorUI.toolsContainer.dom));
-    toolManager.register('brushSelection', new BrushSelection(events, editorUI.toolsContainer.dom, mask));
-    toolManager.register('floodSelection', new FloodSelection(events, editorUI.toolsContainer.dom, mask, editorUI.canvasContainer));
-    toolManager.register('polygonSelection', new PolygonSelection(events, editorUI.toolsContainer.dom, mask));
-    toolManager.register('lassoSelection', new LassoSelection(events, editorUI.toolsContainer.dom, mask));
-    toolManager.register('sphereSelection', new SphereSelection(events, scene, editorUI.canvasContainer));
-    toolManager.register('boxSelection', new BoxSelection(events, scene, editorUI.canvasContainer));
-    toolManager.register('eyedropperSelection', new EyedropperSelection(events, editorUI.toolsContainer.dom, editorUI.canvasContainer));
-    toolManager.register('move', new MoveTool(events, scene));
-    toolManager.register('rotate', new RotateTool(events, scene));
-    toolManager.register('scale', new ScaleTool(events, scene));
-    toolManager.register('measure', new MeasureTool(events, scene, editorUI.toolsContainer.dom, editorUI.canvasContainer));
+    if (!viewerOnly) {
+        // create the mask selection canvas
+        const maskCanvas = document.createElement('canvas');
+        const maskContext = maskCanvas.getContext('2d');
+        maskCanvas.setAttribute('id', 'mask-canvas');
+        maskContext.globalCompositeOperation = 'copy';
 
-    editorUI.toolsContainer.dom.appendChild(maskCanvas);
+        const mask = {
+            canvas: maskCanvas,
+            context: maskContext
+        };
+
+        toolManager.register('rectSelection', new RectSelection(events, editorUI.toolsContainer.dom));
+        toolManager.register('brushSelection', new BrushSelection(events, editorUI.toolsContainer.dom, mask));
+        toolManager.register('floodSelection', new FloodSelection(events, editorUI.toolsContainer.dom, mask, editorUI.canvasContainer));
+        toolManager.register('polygonSelection', new PolygonSelection(events, editorUI.toolsContainer.dom, mask));
+        toolManager.register('lassoSelection', new LassoSelection(events, editorUI.toolsContainer.dom, mask));
+        toolManager.register('sphereSelection', new SphereSelection(events, scene, editorUI.canvasContainer));
+        toolManager.register('boxSelection', new BoxSelection(events, scene, editorUI.canvasContainer));
+        toolManager.register('eyedropperSelection', new EyedropperSelection(events, editorUI.toolsContainer.dom, editorUI.canvasContainer));
+        toolManager.register('move', new MoveTool(events, scene));
+        toolManager.register('rotate', new RotateTool(events, scene));
+        toolManager.register('scale', new ScaleTool(events, scene));
+        toolManager.register('measure', new MeasureTool(events, scene, editorUI.toolsContainer.dom, editorUI.canvasContainer));
+
+        editorUI.toolsContainer.dom.appendChild(maskCanvas);
+    }
 
     window.scene = scene;
 
@@ -244,6 +278,23 @@ const main = async () => {
     scene.start();
 
     // handle load params
+    const rotateImportedSplatsX90 = (imported: any) => {
+        const models = Array.isArray(imported) ? imported : [imported];
+        models.forEach((model: any) => {
+            const entity = model?.entity;
+            if (!entity?.getLocalEulerAngles || !entity?.setLocalEulerAngles) {
+                return;
+            }
+
+            const eulers = entity.getLocalEulerAngles();
+            entity.setLocalEulerAngles(eulers.x + 90, eulers.y, eulers.z);
+
+            if (typeof model.move === 'function') {
+                model.move(entity.getLocalPosition(), entity.getLocalRotation(), entity.getLocalScale());
+            }
+        });
+    };
+
     const loadList = url.searchParams.getAll('load');
     const filenameList = url.searchParams.getAll('filename');
     for (const [i, value] of loadList.entries()) {
@@ -252,10 +303,20 @@ const main = async () => {
             decodeURIComponent(filenameList[i]) :
             decoded.split('/').pop();
 
-        await events.invoke('import', [{
+        const imported = await events.invoke('import', [{
             filename,
             url: decoded
         }]);
+        rotateImportedSplatsX90(imported);
+    }
+
+    // In viewer mode, auto-load a local sample if no load param is provided.
+    if (viewerOnly && loadList.length === 0) {
+        const imported = await events.invoke('import', [{
+            filename: 'Stein.sog',
+            url: './static/Stein.sog'
+        }]);
+        rotateImportedSplatsX90(imported);
     }
 
 

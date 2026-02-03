@@ -33,7 +33,7 @@ import { Picker } from './picker';
 import { Serializer } from './serializer';
 import { vertexShader, fragmentShader } from './shaders/blit-shader';
 import { Splat } from './splat';
-import { TweenValue } from './tween-value';
+import { TweenEasing, TweenValue } from './tween-value';
 import { ShaderQuad, SimpleRenderPass } from './utils/simple-render-pass';
 
 // work globals
@@ -205,17 +205,17 @@ class Camera extends Element {
         return this.distanceTween.target.distance;
     }
 
-    setFocalPoint(point: Vec3, dampingFactorFactor: number = 1) {
-        this.focalPointTween.goto(point, dampingFactorFactor * this.scene.config.controls.dampingFactor);
+    setFocalPoint(point: Vec3, dampingFactorFactor: number = 1, easing: TweenEasing = 'quintic') {
+        this.focalPointTween.goto(point, dampingFactorFactor * this.scene.config.controls.dampingFactor, easing);
     }
 
-    setAzimElev(azim: number, elev: number, dampingFactorFactor: number = 1) {
+    setAzimElev(azim: number, elev: number, dampingFactorFactor: number = 1, easing: TweenEasing = 'quintic') {
         // clamp
         azim = mod(azim, 360);
         elev = Math.max(this.minElev, Math.min(this.maxElev, elev));
 
         const t = this.azimElevTween;
-        t.goto({ azim, elev }, dampingFactorFactor * this.scene.config.controls.dampingFactor);
+        t.goto({ azim, elev }, dampingFactorFactor * this.scene.config.controls.dampingFactor, easing);
 
         // handle wraparound
         if (t.source.azim - azim < -180) {
@@ -228,24 +228,24 @@ class Camera extends Element {
         this.ortho = false;
     }
 
-    setDistance(distance: number, dampingFactorFactor: number = 1) {
+    setDistance(distance: number, dampingFactorFactor: number = 1, easing: TweenEasing = 'quintic') {
         const controls = this.scene.config.controls;
 
         // clamp
         distance = Math.max(controls.minZoom, Math.min(controls.maxZoom, distance));
 
         const t = this.distanceTween;
-        t.goto({ distance }, dampingFactorFactor * controls.dampingFactor);
+        t.goto({ distance }, dampingFactorFactor * controls.dampingFactor, easing);
     }
 
-    setPose(position: Vec3, target: Vec3, dampingFactorFactor: number = 1) {
+    setPose(position: Vec3, target: Vec3, dampingFactorFactor: number = 1, easing: TweenEasing = 'quintic') {
         vec.sub2(target, position);
         const l = vec.length();
         const azim = Math.atan2(-vec.x / l, -vec.z / l) * math.RAD_TO_DEG;
         const elev = Math.asin(vec.y / l) * math.RAD_TO_DEG;
-        this.setFocalPoint(target, dampingFactorFactor);
-        this.setAzimElev(azim, elev, dampingFactorFactor);
-        this.setDistance(l / this.sceneRadius * this.fovFactor, dampingFactorFactor);
+        this.setFocalPoint(target, dampingFactorFactor, easing);
+        this.setAzimElev(azim, elev, dampingFactorFactor, easing);
+        this.setDistance(l / this.sceneRadius * this.fovFactor, dampingFactorFactor, easing);
     }
 
     // transform the world space coordinate to normalized screen coordinate

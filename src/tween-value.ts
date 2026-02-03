@@ -1,11 +1,13 @@
 // possible interpolation functions
 const Interp = {
+    easeIn: (n: number) => n * n,
     sinosidal: (n: number) => Math.sin((n * Math.PI) / 2.0),
     quadratic: (n: number) => n * (2 - n),
     quartic: (n: number) => 1 - --n * n * n * n,
     quintic: (n: number) => Math.pow(n - 1, 5) + 1,
     vertebrae: (n: number) => -Math.pow((Math.cos(n * Math.PI) + 1) / 2, 2) + 1
 };
+type TweenEasing = keyof typeof Interp;
 
 class Ops {
     keys: string[];
@@ -42,6 +44,7 @@ class TweenValue {
     target: any;
     timer: number;
     transitionTime: number;
+    easing: TweenEasing;
 
     constructor(value: any) {
         this.ops = new Ops(value);
@@ -50,9 +53,10 @@ class TweenValue {
         this.target = this.ops.clone(value);
         this.timer = 0;
         this.transitionTime = 0;
+        this.easing = 'quintic';
     }
 
-    goto(target: any, transitionTime = 0.25) {
+    goto(target: any, transitionTime = 0.25, easing: TweenEasing = 'quintic') {
         if (transitionTime === 0) {
             this.ops.copy(this.value, target);
         }
@@ -60,16 +64,18 @@ class TweenValue {
         this.ops.copy(this.target, target);
         this.timer = 0;
         this.transitionTime = transitionTime;
+        this.easing = easing;
     }
 
     update(deltaTime: number) {
         if (this.timer < this.transitionTime) {
             this.timer = Math.min(this.timer + deltaTime, this.transitionTime);
-            this.ops.lerp(this.value, this.source, this.target, Interp.quintic(this.timer / this.transitionTime));
+            const easingFunc = Interp[this.easing] ?? Interp.quintic;
+            this.ops.lerp(this.value, this.source, this.target, easingFunc(this.timer / this.transitionTime));
         } else {
             this.ops.copy(this.value, this.target);
         }
     }
 }
 
-export { TweenValue };
+export { TweenValue, TweenEasing };

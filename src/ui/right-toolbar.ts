@@ -102,7 +102,7 @@ class RightToolbar extends Container {
         const tooltip = (localeKey: string, shortcutId?: string) => {
             const text = localize(localeKey);
             if (shortcutId) {
-                const shortcut = shortcutManager.formatShortcut(shortcutId);
+                const shortcut = shortcutManager?.formatShortcut?.(shortcutId) ?? '';
                 if (shortcut) {
                     return `${text} ( ${shortcut} )`;
                 }

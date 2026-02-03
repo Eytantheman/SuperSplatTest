@@ -701,8 +701,8 @@ const registerEditorEvents = (events: Events, editHistory: EditHistory, scene: S
         };
     });
 
-    events.on('camera.setPose', (pose: { position: Vec3, target: Vec3 }, speed = 1) => {
-        scene.camera.setPose(pose.position, pose.target, speed);
+    events.on('camera.setPose', (pose: { position: Vec3, target: Vec3 }, speed = 1, easing: any = 'quintic') => {
+        scene.camera.setPose(pose.position, pose.target, speed, easing);
     });
 
     // hack: fire events to initialize UI
