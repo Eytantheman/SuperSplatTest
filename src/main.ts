@@ -298,16 +298,32 @@ const main = async () => {
     const importModel = async (filename: string, sourceUrl: string) => {
         // Work around some static hosts returning streamed SOG responses that fail zip random-access reads.
         // For SOG URLs, fetch to a Blob first and import as a local File.
-        if (sourceUrl.toLowerCase().endsWith('.sog')) {
-            const response = await fetch(sourceUrl, { cache: 'no-store' });
-            if (!response.ok) {
-                throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+        const isSogUrl = (() => {
+            try {
+                return new URL(sourceUrl, window.location.href).pathname.toLowerCase().endsWith('.sog');
+            } catch {
+                return sourceUrl.toLowerCase().endsWith('.sog');
             }
-            const blob = await response.blob();
-            return await events.invoke('import', [{
-                filename,
-                contents: new File([blob], filename, { type: 'application/octet-stream' })
-            }]);
+        })();
+
+        if (isSogUrl) {
+            try {
+                const response = await fetch(sourceUrl, { cache: 'no-store' });
+                if (!response.ok) {
+                    throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+                }
+                const blob = await response.blob();
+                return await events.invoke('import', [{
+                    filename,
+                    contents: new File([blob], filename, { type: 'application/octet-stream' })
+                }]);
+            } catch (error) {
+                console.warn('SOG blob import failed, retrying URL import', error);
+                return await events.invoke('import', [{
+                    filename,
+                    url: sourceUrl
+                }]);
+            }
         }
 
         return await events.invoke('import', [{
